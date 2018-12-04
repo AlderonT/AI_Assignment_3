@@ -6,6 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="AI-Assignment 3.pl" />
+    <Compile Include="Utility.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 
