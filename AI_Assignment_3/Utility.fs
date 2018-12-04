@@ -1,6 +1,7 @@
 ﻿namespace AI
 module Utility =
 
+    ///////////////////////////////////////FOR PRINTING ONLY, NOT IMPORTANT TO ALGORITHIM THROUGH LINE 55
     module VTerm =
         open System.Runtime.InteropServices
         open System
@@ -51,13 +52,17 @@ module Utility =
             VTerm.turnOnVtermSupport() |> ignore
         with
             | e -> printfn "Can't turn on VTerm mode, perhaps we're running in a redirected console?\n%s" e.Message
+    
+    ///////////////////////////////////////////////PERTINENT CODE BEGINS HERE
 
+    // Type defs for directions, rooms, characters, and room models
     type Direction = 
         | North 
         | South
         | East
         | West 
     
+    //This is a kind of room but with less information that represents the AI's model of a room as memory.
     type RoomModel = 
         {
             pos : int*int
@@ -68,8 +73,8 @@ module Utility =
             isWall : bool option
             pathBack : bool
         }
-
     
+    //This is a room, each cell of the map consists of a room.
     type Room = 
         {
             x : int
@@ -83,7 +88,7 @@ module Utility =
             hasStench : bool
             hasGlitter : bool
         }
-        with
+        with    //Method for serializing a room to a binary serializer 
             member this.Write(b:System.IO.BinaryWriter) =
                 b.Write(this.x |> byte)
                 b.Write(this.y |> byte)
@@ -116,7 +121,7 @@ module Utility =
                     hasGlitter = flagSet 0
                 }
 
-
+    //Defining a player (this represents our AI)
     type Player = 
         {
             currentPos : (int*int)
@@ -135,6 +140,7 @@ module Utility =
             wumpusLocation : (int*int) option
             memoryMap : Map<int*int,RoomModel>
         }
+    //This defines what kind of actions may be preformed.
     type Action =
         | Escape
         | MoveForward
@@ -143,8 +149,8 @@ module Utility =
         | ShootArrow
         | PickupGold
         | LeaveMap
-        | FollowPathTo of Action list
-
+        | FollowPathTo of Action list //This is a list of actions (a recursive type).
+    ///////////////////////////////////////////////This is an implementation of Greedy First Search for finding our to any point
     let greedyFirst (memoryMap : Map<int*int, RoomModel>) ((targetx,targety) as targetP:int*int) (currentP:int*int) =       
         let rec loop ((currentx,currenty) as currentP:int*int) (seen:Set<int*int>) backtrack cont =
             if currentP = targetP then cont []
@@ -187,7 +193,7 @@ module Utility =
                 loop x.pos seen' (fun _ -> loop2 rest seen oldBacktrack cont) (fun rs -> x::rs |> cont)
         loop currentP (Set.singleton currentP) (fun _ -> []) id
 
-
+    /////////////////////////////////////////////// Determines if it is possible to move to target safely. If so, it returns an action, else None (null)
     let safeMove (player : Player) (target : int*int) =
         match greedyFirst player.memoryMap target player.currentPos with
         | [] -> None
@@ -212,7 +218,8 @@ module Utility =
             | East, South -> Some TurnLeft
             | East, North -> Some TurnRight
             | East, East -> Some MoveForward
-            
+
+    /////////////////////////////////////////////// This takes a player and looks at a path, determining the actions the player must perform to follow said path. 
     let convertPathToMoves (player:Player) (path:(int*int) list) =
         let rec loop (player:Player) path cont =
             match path with
@@ -238,80 +245,88 @@ module Utility =
                 loop player' rest' (fun actions -> action :: actions |> cont)
         loop player path (fun actions -> FollowPathTo actions)            
 
+    //Looks through the player memoryMap and tries to find if it knows about the squares around x,y. it returns all the cells it knows about
     let knownSpots (player:Player) (x,y) =
         [x,y+1;x+1,y;x,y-1;x-1,y]
         |> List.choose (player.memoryMap.TryFind)
+
+    //Tries to find the wumpus, or infer as to where it resides. it takes the player and returns a player with a Some value for wumpusLocation (if it can find the wumpus).
     let canWeFindWumpus (player:Player) =
         if player.wumpusLocation.IsNone then
-            let frontier =
-                player.memoryMap
-                |> Seq.map (fun (KeyValue(k,v)) -> k) // get all the existing positions we've seen
-                |> Seq.filter (fun p -> match player.memoryMap.[p].isWall with Some true -> false | _ -> true) // remove all the walls
-                |> Seq.collect (fun (x,y) -> [x,y+1;x+1,y;x,y-1;x-1,y] ) // generate a list of adjacent rooms from this one
-                |> Seq.distinct
-                |> Seq.filter (fun p -> // filter out any known locations from this list that have been visited (ie isWall is Some value)
+            let frontier =                                                                                      //Get the frontier of known locations
+                player.memoryMap                                                                                
+                |> Seq.map (fun (KeyValue(k,v)) -> k)                                                           // get all the existing positions we've seen
+                |> Seq.filter (fun p -> match player.memoryMap.[p].isWall with Some true -> false | _ -> true)  // remove all the walls
+                |> Seq.collect (fun (x,y) -> [x,y+1;x+1,y;x,y-1;x-1,y] )                                        // generate a list of adjacent rooms from this one
+                |> Seq.distinct                                                                                 // get distinct rooms
+                |> Seq.filter (fun p ->                                                                         // filter out any known locations from this list that have been visited (ie isWall is Some value)
                     match player.memoryMap.TryFind p with
                     | None -> true
                     | Some rm -> rm.isWall = None
                 )
                 |> Seq.toList
-            let knownSpots = knownSpots player
-            let wumpusSpots =
+            let knownSpots = knownSpots player //get the locations we've seen
+            let wumpusSpots =   // look at the elements on the frontier and see if anything indicates the Wumpus location. Returns a list of possible wumpus locations
                 frontier
                 |> List.filter (fun p ->
                     let stenchCnt, totalCnt =
                         knownSpots p
                         |> Seq.fold (fun (sc,tc) (rm:RoomModel) ->
-                            match rm.hasStench, rm.isWall with
+                            match rm.hasStench, rm.isWall with // the use of isWall <> None lets us know that the location is KNOWN and not postulated to exist
                             | None, None -> (sc,tc)
                             | _,Some true -> (sc,tc)
-                            | Some s, _ -> (if s then sc+1 else sc),(tc+1)
+                            | Some s, _ -> (if s then sc+1 else sc),(tc+1) 
                             | _ -> failwithf "This should NEVER be able to happen!!"
                         ) (0,0)
-                    stenchCnt = totalCnt && totalCnt > 1
+                    stenchCnt = totalCnt && totalCnt > 1    // We can assume there is a wumpus here since there is more than 1 total known adjacent spots and they are all stenches. This is because this is only 1 wumpus
+                                                            // This would not be a valid assumption if there were more than one wumpus. For more than one we would need to also look at the diagonals to this location which we didn't
+                                                            // have time to implement and test.
                 )
-            match wumpusSpots with
-            | [wumpusSpots] ->
+            match wumpusSpots with  //Look at the wumpas locations
+            | [wumpusSpots] ->  //If there is only one location found, then we know this is the wumpus location
                 printfn "Found wumpus at %A" wumpusSpots
                 { player with wumpusLocation = Some wumpusSpots }
-            | [] -> player
-            | moreThanOneWumpus -> failwithf "We shouldn't be able to find more than one wumpus! %A" moreThanOneWumpus
+            | [] -> player  //If there is no locations found, then we cannot postulate a wumpus location
+            | moreThanOneWumpus -> failwithf "We shouldn't be able to find more than one wumpus! %A" moreThanOneWumpus  // If we reach this case, then we have a bad map since there is no way more than one spot could have extact number of stenches surrounding it 
+                                                                                                                        // The reason we didn't implement diagnonal wumpus and pit testing is because we did not have time to test either.
         else player
     
-    
+    ///////////////////////////////////////////////FIRST ORDER LOGIC USED HERE FOR DECISIONS
     let bestLocation (player:Player) =
         let playerx,playery = player.currentPos
         let frontier =
             player.memoryMap
-            |> Seq.map (fun (KeyValue(k,v)) -> k) // get all the existing positions we've seen
-            |> Seq.filter (fun p -> match player.memoryMap.[p].isWall with Some true -> false | _ -> true) // remove all the walls
-            |> Seq.collect (fun (x,y) -> [x,y+1;x+1,y;x,y-1;x-1,y] ) // generate a list of adjacent rooms from this one
-            |> Seq.distinct
-            |> Seq.filter (fun p -> if player.wumpusLocation.IsNone then true else p <> player.wumpusLocation.Value)
-            |> Seq.filter (fun p -> // filter out any known locations from this list that have been visited (ie isWall is Some value)
+            |> Seq.map (fun (KeyValue(k,v)) -> k)                                                                   // get all the existing positions we've seen
+            |> Seq.filter (fun p -> match player.memoryMap.[p].isWall with Some true -> false | _ -> true)          // remove all the walls
+            |> Seq.collect (fun (x,y) -> [x,y+1;x+1,y;x,y-1;x-1,y] )                                                // generate a list of adjacent rooms from this one
+            |> Seq.distinct                                                                                         // get distinct rooms
+            |> Seq.filter (fun p -> if player.wumpusLocation.IsNone then true else p <> player.wumpusLocation.Value)// remove all wumpus locations
+            |> Seq.filter (fun p ->                                                                                 // filter out any known locations from this list that have been visited (ie isWall is Some value)
                 match player.memoryMap.TryFind p with
                 | None -> true
                 | Some rm -> rm.isWall = None
             )
             |> Seq.toList
         let knownSpots = knownSpots player
-        let safeSpots =
+        let safeSpots = // Determine, from the frontier, where safe locations are
             frontier
-            |> List.filter (fun p ->
-                if player.wumpusLocation.IsNone then
+            |> List.filter (fun p ->    //Get only safe locations 
+                if player.wumpusLocation.IsNone then    //if we don't know where the wumpus locations is,
                     let breezeCnt, stenchCnt, totalCnt =
-                        knownSpots p
-                        |> Seq.fold (fun (bc,sc,tc) (rm:RoomModel) ->
-                            match rm.hasBreeze, rm.hasStench, rm.isWall with
-                            | None, None, None -> (bc,sc,tc)
-                            | _,_,Some true -> (bc,sc,tc)
-                            | Some b, Some s,_ -> (if b then bc+1 else bc),(if s then sc+1 else sc),(tc+1)
-                            | _ -> failwithf "This should NEVER be able to happen!!"
+                        knownSpots p                                            //get the known spots around p
+                        |> Seq.fold (fun (bc,sc,tc) (rm:RoomModel) ->           
+                            match rm.hasBreeze, rm.hasStench, rm.isWall with    //check for having breezes, stenches, or being a wall
+                            | None, None, None -> (bc,sc,tc)                    //If you cannot find any breeze, stench, or wall, then return the count of breezes, stenches, and walls
+                            | _,_,Some true -> (bc,sc,tc)                       //If you find a wall, then return the count of breezes, stenches, and walls
+                            | Some b, Some s,_ -> (if b then bc+1 else bc),(if s then sc+1 else sc),(tc+1)  //if you find a breeze, increment the breeze count by one, and if you find a stench, inc stench count by 1.
+                            | _ -> failwithf "This should NEVER be able to happen!!"//catch case
                         ) (0,0,0)
-                    breezeCnt <> totalCnt && stenchCnt <> totalCnt
-                else
+                    breezeCnt <> totalCnt && stenchCnt <> totalCnt  //if the known spots do not equal the number of breezes and do not equal the number of stenches, it's safe (since not all known location around x,y have breezes or stenches.
+                    //  a <> c && b <> c therefore neither b or a can equal c to evaluate as true
+                
+                else                            //we know where the wampus location
                     let breezeCnt, totalCnt =
-                        knownSpots p
+                        knownSpots p    //get known locations and remove bad cases and get the count of breezes
                         |> Seq.fold (fun (bc,tc) (rm:RoomModel) ->
                             match rm.hasBreeze, rm.isWall with
                             | None, None -> (bc,tc)
@@ -319,36 +334,39 @@ module Utility =
                             | Some b,_ -> (if b then bc+1 else bc),(tc+1)
                             | _ -> failwithf "This should NEVER be able to happen!!"
                         ) (0,0)
-                    breezeCnt <> totalCnt
+
+                    breezeCnt <> totalCnt //if breezes equal total count, then this square is bad (since it is possible to have a pit in the square we're looking at.
+                    
             )
-            |> List.map (fun ((x,y) as p) -> p,abs(x-playerx)+abs(y-playery))
-            |> List.sortBy snd
+            |> List.map (fun ((x,y) as p) -> p,abs(x-playerx)+abs(y-playery))   //get what locations these room coordinates and compute their distance from the position
+            |> List.sortBy snd                                                  //sort by distance (distance is the second part of the tuple)
 
         match safeSpots with
-        | (x,distance) :: rest -> Some x
-        | [] -> None              
-
+        | (x,distance) :: rest -> Some x    //go the the return the closest safe spot
+        | [] -> None                        //if we cannot find a safe spot return None
+    
+    // get a decision, recursively using knowledge from the player
     let rec decision (player : Player) = 
-        if player.seesGlitter then PickupGold
-        elif player.escape && player.currentPos = (0,0) then LeaveMap
-        elif player.escape then
+        if player.seesGlitter then PickupGold                           // we are impulsive, if you see the gold, pick it up
+        elif player.escape && player.currentPos = (0,0) then LeaveMap   // if the escape flag is set to true and we are at the start leave.
+        elif player.escape then                                         // if the escape flag is set to true and we are NOT at the start, use a greedy first search to find our way to the start.
             greedyFirst player.memoryMap (0,0) player.currentPos
             |> List.map (fun rm -> rm.pos)
-            |> convertPathToMoves player            
-        elif player.hasGold then 
+            |> convertPathToMoves player                                // we convert the path from the search into actions.
+        elif player.hasGold then                                        // if you have the gold, escape (sets the escape flag)
             Escape
-        else 
-            // find the next safe location to move to
-            match bestLocation player with
-            | None ->
-                // escape since we can't progress
+        else                                                            // Any other case we follow normal operation proceedures: 
+            match bestLocation player with                              // find the next safe location to move to
+            | None ->                                                   // if we can't progress, escape (we choose life!)
                 Escape
-            | Some target ->
+            | Some target ->                                            // if we find a location, greedy first search our way to that best location (usually it's quite close)
                 let path =
                     greedyFirst player.memoryMap target player.currentPos
                     |> List.map (fun rm -> rm.pos)
-                convertPathToMoves player path
-            
+                convertPathToMoves player path                          // we convert the path from the search into actions.
+    
+    ///////////////////////////////////////////////INFERENCE
+    // Basically these functions serve to update the player state when it hits a wall or needs to sense the room it's in.
     let hitWall p hitWall (player:Player) =
         let rm =
             match player.memoryMap.TryFind p, hitWall with
@@ -380,9 +398,10 @@ module Utility =
             | Some rm -> { rm with hasBreeze = Some hasBreeze; hasStench = Some hasStench}
         { player with memoryMap = player.memoryMap.Add(p,rm) }
         
-
+    ///////////////////////////////////////////////UPDATE CHARACTER MODEL AND MAP
     let checkPlayer (player:Player) = 
         let x,y = player.currentPos
+        //if the player walked into a wall, pop them back into the square they came from.
         if x<0 then 
             printfn "Hit Western Wall "
             {player with currentPos = (0,y)}
@@ -399,16 +418,19 @@ module Utility =
             printfn "Hit Northern Wall "
             {player with currentPos = (x, (player.map.GetLength 1)-1)}
             |> hitWall player.currentPos true
+        // if the player walked into the wampus, it gets nommed
         elif player.map.[x,y].hasWampus then 
             printfn "The Wumpus enjoyed his snack"
             {player with dead = true}
             |> foundWumpus player.currentPos true
             |> hitWall player.currentPos false
+        // if the player walked into a pit, it falls...
         elif player.map.[x,y].hasPit then 
             printfn "There was a long fall"
             {player with dead = true}
             |> foundPit player.currentPos true
             |> hitWall player.currentPos false
+        // Otherwise update the player state, telling the player what it sensed.
         else
             let room = player.map.[x,y] 
             let p =
@@ -433,7 +455,7 @@ module Utility =
             {p with map = p.map |> Array2D.map(fun r -> {r with hasChar = ((r.x,r.y) = p.currentPos); fow = r.fow && not ((r.x,r.y) = p.currentPos)})}
             |> canWeFindWumpus
         
-    
+    //Updates teh player state and prints the actions performed by the player, if they are notable.
     let rec updatePlayer (action:Action) (player:Player)  =
         if player.dead || player.finished then 
             player,[action]
@@ -474,6 +496,7 @@ module Utility =
                     let x,y = p.currentPos
                     printfn "Walking Forward into (%d,%d) ..." x y
                     p,[action]
+            //our heavily conservative AI will not shoot the arrow for fear of loosing points.
             | ShootArrow when player.arrows>0 ->
                 printfn "Shooting an Arrow toward: %A" player.direction
                 let px,py = player.currentPos
@@ -511,9 +534,9 @@ module Utility =
         fun max -> rand.Next (max)
   
 
-    
-    let generateMap n=                              //(row,column)
-        let charLoc = (0,0)
+    ///////////////////////////////////////////////MAP GENERATION
+    let generateMap n=                              //(row,column) - like a graph
+        let charLoc = (0,0)                         // init the character point as 0,0, and generate the map according the to rules set in the assignment.
         let wampusLoc = 
             let rec loop () =
                 let w = (getRandNumber n,getRandNumber n)
@@ -527,9 +550,9 @@ module Utility =
 
         let mutable pitList = []
 
-        let isPit p =
+        let isPit p =   
             if p <> charLoc && p <> goldLoc then 
-                if getRandNumber 5 = 0 then 
+                if getRandNumber 5 = 0 then         //Pits have a 20% chance of spawning in *ANY* square, not occupied by gold, or the player. it is entirely *possible* (however unlikely) that there will be n^2 - 2 pits. (no maps of this configuration have spawned in tests though)
                     pitList <- p :: pitList
                     true
                 else 
@@ -547,7 +570,7 @@ module Utility =
         let isAdjacentToPit p =
             pitList|>List.exists (isAdjacent p)
 
-                
+        // Update positions with breezes and stenches per the pit and wampus locations.                 
         Array2D.init n n (fun x y -> 
             let p = (x,y)
             {
@@ -568,6 +591,8 @@ module Utility =
                 hasStench = isAdjacent (x,y) wampusLoc
             }
         )
+
+    ///////////////////////////////////////////////FOR TESTING
     let makeTestPlayer () = 
         let charLoc = 0,0
         let wumpusLoc = 2,1
@@ -624,27 +649,34 @@ module Utility =
             memoryMap = Map.empty
         }
         |> checkPlayer
-    type GameResult =
+
+    ///////////////////////////////////////////////GAME DEFINES
+    type GameResult =   //There are really only two results.
         | Escaped of int*Action list
         | Died of int*Action list
+
     let runPlayer (player:Player) =
         let rec loop (player:Player) cont =
-            if player.finished || player.dead then cont (player.hasGold,player.dead,[])
+            if player.finished || player.dead then cont (player.hasGold,player.dead,[]) //if the player isn't finished, or dead, call cont, which does nothing.
             else
-                let action = decision player
-                let newPlayer,actions = updatePlayer action player
-                match actions with
+                let action = decision player                        //else get a decision from the player
+                let newPlayer,actions = updatePlayer action player  //get the new player state and it's actions and apply them to the next loop
+                match actions with          
                 | [action] ->
+
                     loop newPlayer (fun (hasGold,dead,actions) -> (hasGold,dead,action :: actions) |> cont)
                 | action ->
                     loop newPlayer (fun (hasGold,dead,actions) -> (hasGold,dead,action @ actions) |> cont)
         let hasGold,isDead,actions = loop player id
+        //define the action scores:
         let actionScore = actions |> Seq.map (function | TurnRight | TurnLeft -> 0 | MoveForward -> -1 | PickupGold -> 0 | ShootArrow -> -10 | LeaveMap -> 0 | FollowPathTo(_) -> 0 | Escape -> 0) |> Seq.sum
-        if isDead then
+        if isDead then  // if we died, that is bad
             Died(actionScore-1000,actions)
-        else
+        else            // if we escaped, with the gold, that is good, otherwise, not as good.
             Escaped(actionScore+(if hasGold then 1000 else 0),actions)
-
+    
+    ///////////////////////////////////////////////GET CHARACTER & MAP
+    // This just gets the player and map, these don't have much interesting but defining what is initialized as the player start.
     let newPlayerOfMapSize n =
         let map = generateMap n
         {
@@ -686,6 +718,8 @@ module Utility =
         }
         |> checkPlayer        
 
+    ///////////////////////////////////////////////MAP DISPLAY
+    // This just makes printing nice.
     let printMap (map:Room[,]) =
         for y = (map.GetLength(1)-1) downto 0 do
             printf "%02d" y
@@ -725,6 +759,8 @@ module Utility =
         for x = 0 to (map.GetLength(0)-1) do
             printf " %02d  " x
         printfn ""
+    ///////////////////////////////////////////////GET THE MAP AS A STRING
+    // This is for getting the map as a string for printing with other details.
     let sprintMap (map:Room[,]) =
         seq {
             yield ""
@@ -775,7 +811,9 @@ module Utility =
         } |> String.concat "\n"
     let printPlayer (player:Player) =
         printMap player.map
-
+    
+    ///////////////////////////////////////////////GET MAP DATA STRING
+    // For serializeation
     let serializeMap (map:Room[,]) =
         use ms = new System.IO.MemoryStream();
         use bw = new System.IO.BinaryWriter(ms);
@@ -794,7 +832,9 @@ module Utility =
         bw.Close()
         let ba = ms.ToArray()
         System.Convert.ToBase64String ba
-
+    
+    ///////////////////////////////////////////////PRODUCE MAP FROM MAPSTRING
+    // For deserialization 
     let deserializeMap (mapTxt:string) =
         let ba = System.Convert.FromBase64String mapTxt
         use ms = new System.IO.MemoryStream(ba);
@@ -843,7 +883,8 @@ module Utility =
                             yield arr.[x,y]
                     }
         }
-
+    ///////////////////////////////////////////////SCORING
+    // compute scores for sets of maps.
     let computeAverageScoreForMaps (maps:Room[,] seq) =
         let tests =
             maps
@@ -862,10 +903,12 @@ module Utility =
             |> Seq.average
         avgScore,errors
 
+    // Run several ('count') Maps of size 'size', and compute the avg score.
     let computeAverageScoreForSize count size =
         Seq.init count (fun _ -> generateMap size)
         |> computeAverageScoreForMaps
-            
+    
+    ///////////////////////////////////////////////FOR TESTS and Debugging, is never run and can be ignored below here.
     let test () = 
 
         (*
@@ -903,13 +946,13 @@ module Utility =
 module Test =
     open Utility
 
-    let map = Utility.generateMap 5
-    map.[0,0] <- { map.[0,0] with hasBreeze = false }
-    map.[0,1] <- { map.[0,1] with hasPit = false; hasBreeze = true }
+    //let map = Utility.generateMap 5
+    //map.[0,0] <- { map.[0,0] with hasBreeze = false }
+    //map.[0,1] <- { map.[0,1] with hasPit = false; hasBreeze = true }
     
-    map
-    |> newPlayerFromMap
-    |> runPlayer
+    //map
+    //|> newPlayerFromMap
+    //|> runPlayer
 
     let resultsTest4x4 = Utility.computeAverageScoreForSize 100 4
     let resultsTest5x5 = Utility.computeAverageScoreForSize 100 5
@@ -920,4 +963,38 @@ module Test =
     let resultsTest10x10 = Utility.computeAverageScoreForSize 100 10
 
 
-    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    //line 1000
