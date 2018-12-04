@@ -13,5 +13,5 @@ module program =
         let resultsTest5x5 = Utility.computeAverageScoreForSize 100 5
         let resultsTest8x8 = Utility.computeAverageScoreForSize 100 8
         let resultsTest10x10 = Utility.computeAverageScoreForSize 100 10
-        printfn "4x4 avg (Score,Visited Cells):   %A \n5x5 avg (Score,Visited Cells):   %A \n8x8 avg (Score,Visited Cells):   %A \n10x10 avg (Score,Visited Cells): %A" (resultsTest4x4 |> fst) (resultsTest5x5 |> fst) (resultsTest8x8 |> fst) (resultsTest10x10 |> fst)
+        printfn "\n4x4 avg   (Score,Visited Cells): %A \n5x5 avg   (Score,Visited Cells): %A \n8x8 avg   (Score,Visited Cells): %A \n10x10 avg (Score,Visited Cells): %A" (resultsTest4x4 |> fst) (resultsTest5x5 |> fst) (resultsTest8x8 |> fst) (resultsTest10x10 |> fst)
         0 // return an integer exit code
