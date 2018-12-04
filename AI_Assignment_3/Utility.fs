@@ -652,28 +652,30 @@ module Utility =
 
     ///////////////////////////////////////////////GAME DEFINES
     type GameResult =   //There are really only two results.
-        | Escaped of int*Action list
-        | Died of int*Action list
+        | Escaped of int*int*Action list
+        | Died of int*int*Action list
 
     let runPlayer (player:Player) =
         let rec loop (player:Player) cont =
-            if player.finished || player.dead then cont (player.hasGold,player.dead,[]) //if the player isn't finished, or dead, call cont, which does nothing.
+            if player.finished || player.dead then
+                let cellsVisited = player.memoryMap |> Seq.filter (fun (KeyValue(_,rm)) -> match rm.isWall with | Some false -> true | _ -> false) |> Seq.length
+                cont (player.hasGold,player.dead,cellsVisited,[]) //if the player isn't finished, or dead, call cont, which does nothing.
             else
                 let action = decision player                        //else get a decision from the player
                 let newPlayer,actions = updatePlayer action player  //get the new player state and it's actions and apply them to the next loop
                 match actions with          
                 | [action] ->
 
-                    loop newPlayer (fun (hasGold,dead,actions) -> (hasGold,dead,action :: actions) |> cont)
+                    loop newPlayer (fun (hasGold,dead,cellsVisited,actions) -> (hasGold,dead,cellsVisited,action :: actions) |> cont)
                 | action ->
-                    loop newPlayer (fun (hasGold,dead,actions) -> (hasGold,dead,action @ actions) |> cont)
-        let hasGold,isDead,actions = loop player id
+                    loop newPlayer (fun (hasGold,dead,cellsVisited,actions) -> (hasGold,dead,cellsVisited,action @ actions) |> cont)
+        let hasGold,isDead,cellsVisited,actions = loop player id
         //define the action scores:
         let actionScore = actions |> Seq.map (function | TurnRight | TurnLeft -> 0 | MoveForward -> -1 | PickupGold -> 0 | ShootArrow -> -10 | LeaveMap -> 0 | FollowPathTo(_) -> 0 | Escape -> 0) |> Seq.sum
         if isDead then  // if we died, that is bad
-            Died(actionScore-1000,actions)
+            Died(actionScore-1000,cellsVisited,actions)
         else            // if we escaped, with the gold, that is good, otherwise, not as good.
-            Escaped(actionScore+(if hasGold then 1000 else 0),actions)
+            Escaped(actionScore+(if hasGold then 1000 else 0),cellsVisited,actions)
     
     ///////////////////////////////////////////////GET CHARACTER & MAP
     // This just gets the player and map, these don't have much interesting but defining what is initialized as the player start.
@@ -899,9 +901,13 @@ module Utility =
         let errors = tests |> List.choose (function | Result.Error(e,map) -> Some (e.Message, serializeMap map) | _ -> None)
         let avgScore =
             tests
-            |> Seq.choose (function | Result.Ok (Died(score,_)) -> score |> float |> Some | Result.Ok (Escaped(score,_)) -> score |> float |> Some | _ -> None)
+            |> Seq.choose (function | Result.Ok (Died(score,_,_)) -> score |> float |> Some | Result.Ok (Escaped(score,_,_)) -> score |> float |> Some | _ -> None)
             |> Seq.average
-        avgScore,errors
+        let avgCellsVisited =
+            tests
+            |> Seq.choose (function | Result.Ok (Died(_,visited,_)) -> visited |> float |> Some | Result.Ok (Escaped(_,visited,_)) -> visited |> float |> Some | _ -> None)
+            |> Seq.average
+        (avgScore,avgCellsVisited),errors
 
     // Run several ('count') Maps of size 'size', and compute the avg score.
     let computeAverageScoreForSize count size =
